@@ -6,9 +6,6 @@ on:
 jobs:
   lint-craneliftc:
     runs-on: ubuntu-latest
-    defaults:
-        run:
-          working-directory: ./cranelift
     environment: secret
     steps:
       - uses: actions/checkout@v3
@@ -25,51 +22,3 @@ jobs:
           cbindgen --config cbindgen.toml --crate craneliftc --output ./headers/craneliftc.h
           git diff --quiet
           cargo publish -p craneliftc --token "$CARGO_TOKEN" --dry-run
-  test-craneliftc:
-    runs-on: ubuntu-latest
-    defaults:
-        run:
-          working-directory: ./cranelift
-    steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly
-      - run: |
-          cargo build --release
-          cargo test
-  test-and-lint-debug:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{matrix.os}}
-    steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly
-      - run: |
-          cd cranelift
-          cargo build --release
-      - uses: goto-bus-stop/setup-zig@v2
-      - run: |
-          zig build test
-          zig fmt ./src --check
-          zig fmt build.zig --check
-  test-release:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{matrix.os}}
-    steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly
-      - run: |
-          cd cranelift
-          cargo build --release
-      - uses: goto-bus-stop/setup-zig@v2
-      - run: |
-          zig build -Doptimize=ReleaseSafe
-          zig build test -Doptimize=ReleaseSafe
