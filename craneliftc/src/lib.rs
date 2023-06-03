@@ -222,12 +222,30 @@ Software.
 
 use std::ffi::{c_char, CString};
 
-use cranelift::codegen::ir::{types::*, Function, UserFuncName};
+use cranelift::codegen::ir::{entities::JumpTable, types::*, Function, TrapCode, UserFuncName};
 use cranelift::codegen::verifier::verify_function;
 use cranelift::prelude::isa::CallConv;
 use cranelift::prelude::settings::{self, Builder, Flags};
-use cranelift::prelude::{AbiParam, Imm64, Value, Variable};
-use cranelift::prelude::{Block, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature};
+use cranelift::prelude::{
+    AbiParam, Block, FunctionBuilder, FunctionBuilderContext, Imm64, InstBuilder, Signature, Value,
+    Variable,
+};
+
+#[repr(C)]
+pub enum CTrapCode {
+    StackOverflow,
+    HeapOutOfBounds,
+    HeapMisaligned,
+    TableOutOfBounds,
+    IndirectCallToNull,
+    BadSignature,
+    IntegerOverflow,
+    IntegerDivisionByZero,
+    BadConversionToInteger,
+    UnreachableCodeReached,
+    Interrupt,
+    User(u16),
+}
 
 #[repr(C)]
 pub enum CType {
@@ -268,6 +286,8 @@ pub struct CValue(u32);
 pub struct CInst(u32);
 #[repr(transparent)]
 pub struct CFuncRef(u32);
+#[repr(transparent)]
+pub struct CJumpTable(u32);
 
 #[repr(C)]
 pub enum CCallConv {
@@ -289,6 +309,16 @@ macro_rules! easy_type {
         }
     };
 }
+
+macro_rules! value_enum {
+    ($val:ident, $nl:ident, $nr:ident, $var:ident,$custom:ident, $($variant:ident,)*) => {
+        match $val {
+            $($nl::$variant => $nr::$variant,)*
+            _ => $nr::$var($custom)
+        }
+    };
+}
+
 macro_rules! easy_enum {
     ($val:ident, $nl:ident, $nr:ident, $($variant:ident,)*) => {
         match $val {
@@ -321,6 +351,28 @@ fn convert_CCallConv(ccd: CCallConv) -> CallConv {
         WasmtimeSystemV,
         WasmtimeFastcall,
         WasmtimeAppleAarch64,
+    );
+}
+
+#[allow(non_snake_case)]
+fn convert_CTrapCode(ctc: CTrapCode, user: u16) -> TrapCode {
+    return value_enum!(
+        ctc,
+        CTrapCode,
+        TrapCode,
+        User,
+        user,
+        StackOverflow,
+        HeapOutOfBounds,
+        HeapMisaligned,
+        TableOutOfBounds,
+        IndirectCallToNull,
+        BadSignature,
+        IntegerOverflow,
+        IntegerDivisionByZero,
+        BadConversionToInteger,
+        UnreachableCodeReached,
+        Interrupt,
     );
 }
 
@@ -588,6 +640,27 @@ pub extern "C" fn CL_Builder_builder() -> *mut Builder {
 // MACROS FOR INSTRUCTIONS
 //
 
+macro_rules! instr_five_value_block_svalue_block_svalue_inst {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, val: CValue, block_one_label: CBlock, block_one_args: *mut CValue, one_len: usize, block_two_label: CBlock, block_two_args: *mut CValue, two_len: usize) -> CInst {
+                assert!(!builder.is_null());
+                let first = unsafe { core::slice::from_raw_parts(block_one_args, one_len)};
+                let second = unsafe { core::slice::from_raw_parts(block_two_args, two_len)};
+                let converts_one: Vec<Value> = first.into_iter().map(|x| {return Value::from_u32(x.0); }).collect();
+                let converts_two: Vec<Value> = second.into_iter().map(|x| {return Value::from_u32(x.0); }).collect();
+                let ubuilder = unsafe { &mut *builder };
+                let cval = Value::from_u32(val.0);
+                let result = ubuilder
+                    .ins()
+                    .$invoke(cval, Block::from_u32(block_one_label.0), converts_one.as_slice(), Block::from_u32(block_two_label.0), converts_two.as_slice());
+                CInst(result.as_u32())
+            }
+        }
+    };
+}
 macro_rules! instr_two_block_svalue_inst {
     ($invoke:ident) => {
         paste::paste! {
@@ -602,6 +675,23 @@ macro_rules! instr_two_block_svalue_inst {
                     .ins()
                     .$invoke(Block::from_u32(block_call_label.0), converts.as_slice());
                 CInst(result.as_u32())
+            }
+        }
+    };
+}
+
+macro_rules! instr_three_value_value_value_value {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, c: CValue, left: CValue, right: CValue) -> CValue {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(Value::from_u32(c.0), Value::from_u32(left.0), Value::from_u32(right.0));
+                CValue(result.as_u32())
             }
         }
     };
@@ -624,6 +714,23 @@ macro_rules! instr_two_value_value_value {
     };
 }
 
+macro_rules! instr_one_value_inst {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CValue) -> CInst {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(Value::from_u32(one.0));
+                CInst(result.as_u32())
+            }
+        }
+    };
+}
+
 macro_rules! instr_one_value_value {
     ($invoke:ident) => {
         paste::paste! {
@@ -635,6 +742,23 @@ macro_rules! instr_one_value_value {
                 let result = ubuilder
                     .ins()
                     .$invoke(Value::from_u32(one.0));
+                CValue(result.as_u32())
+            }
+        }
+    };
+}
+
+macro_rules! instr_two_value_imm_value {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CValue, imm: CImm64) -> CValue {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(Value::from_u32(one.0), Imm64::new(imm.0));
                 CValue(result.as_u32())
             }
         }
@@ -658,6 +782,23 @@ macro_rules! instr_two_type_imm_value {
     };
 }
 
+macro_rules! instr_two_value_jt_inst {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, val: CValue, jt: CJumpTable) -> CInst {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(Value::from_u32(val.0), JumpTable::from_u32(jt.0));
+                CInst(result.as_u32())
+            }
+        }
+    };
+}
+
 macro_rules! instr_one_svalue_inst {
     ($invoke:ident) => {
         paste::paste! {
@@ -672,6 +813,40 @@ macro_rules! instr_one_svalue_inst {
                 let result = ubuilder
                     .ins()
                     .$invoke(converts.as_slice());
+                CInst(result.as_u32())
+            }
+        }
+    };
+}
+
+macro_rules! instr_two_value_code_inst {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, val: CValue, code: CTrapCode, user: u16) -> CInst {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(Value::from_u32(val.0),convert_CTrapCode(code, user));
+                CInst(result.as_u32())
+            }
+        }
+    };
+}
+
+macro_rules! instr_one_code_inst {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, code: CTrapCode, user: u16) -> CInst {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(convert_CTrapCode(code, user));
                 CInst(result.as_u32())
             }
         }
@@ -699,6 +874,15 @@ macro_rules! instr_zero_inst {
 
 // () -> inst
 instr_zero_inst!(debugtrap);
+instr_zero_inst!(fence);
+
+// (code) -> inst
+instr_one_code_inst!(trap);
+instr_one_code_inst!(resumable_trap);
+
+// (value, code) -> inst
+instr_two_value_code_inst!(trapz);
+instr_two_value_code_inst!(trapnz);
 
 // (svalue) -> inst
 instr_one_svalue_inst!(return_);
@@ -706,16 +890,120 @@ instr_one_svalue_inst!(return_);
 // (type, imm64) -> value
 instr_two_type_imm_value!(iconst);
 
+// (value, imm64) -> value
+instr_two_value_imm_value!(iadd_imm);
+instr_two_value_imm_value!(imul_imm);
+instr_two_value_imm_value!(udiv_imm);
+instr_two_value_imm_value!(sdiv_imm);
+instr_two_value_imm_value!(urem_imm);
+instr_two_value_imm_value!(srem_imm);
+instr_two_value_imm_value!(irsub_imm);
+instr_two_value_imm_value!(band_imm);
+instr_two_value_imm_value!(bor_imm);
+instr_two_value_imm_value!(bxor_imm);
+instr_two_value_imm_value!(rotl_imm);
+instr_two_value_imm_value!(rotr_imm);
+instr_two_value_imm_value!(ishl_imm);
+instr_two_value_imm_value!(ushr_imm);
+instr_two_value_imm_value!(sshr_imm);
+
+// (value, jt) -> inst
+instr_two_value_jt_inst!(br_table);
+
 // (block, svalue) -> inst
 instr_two_block_svalue_inst!(jump);
+
+// (value, value, value) -> value
+
+instr_three_value_value_value_value!(select);
+instr_three_value_value_value_value!(select_spectre_guard);
+instr_three_value_value_value_value!(bitselect);
+instr_three_value_value_value_value!(x86_blendv);
+instr_three_value_value_value_value!(iadd_cin);
+instr_three_value_value_value_value!(isub_bin);
+instr_three_value_value_value_value!(fma);
 
 // (value, value) -> value
 
 instr_two_value_value_value!(iadd);
+instr_two_value_value_value!(uadd_sat);
+instr_two_value_value_value!(sadd_sat);
 instr_two_value_value_value!(isub);
+instr_two_value_value_value!(udiv);
+instr_two_value_value_value!(sdiv);
+instr_two_value_value_value!(urem);
+instr_two_value_value_value!(srem);
+instr_two_value_value_value!(usub_sat);
+instr_two_value_value_value!(ssub_sat);
 instr_two_value_value_value!(imul);
 instr_two_value_value_value!(umulhi);
+instr_two_value_value_value!(smulhi);
+instr_two_value_value_value!(sqmul_round_sat);
+instr_two_value_value_value!(x86_pmulhrsw);
+instr_two_value_value_value!(smin);
+instr_two_value_value_value!(umin);
+instr_two_value_value_value!(smax);
+instr_two_value_value_value!(umax);
+instr_two_value_value_value!(avg_round);
+instr_two_value_value_value!(swizzle);
+instr_two_value_value_value!(x86_pshufb);
+instr_two_value_value_value!(band);
+instr_two_value_value_value!(bor);
+instr_two_value_value_value!(bxor);
+instr_two_value_value_value!(band_not);
+instr_two_value_value_value!(bor_not);
+instr_two_value_value_value!(bxor_not);
+instr_two_value_value_value!(rotl);
+instr_two_value_value_value!(rotr);
+instr_two_value_value_value!(ishl);
+instr_two_value_value_value!(ushr);
+instr_two_value_value_value!(sshr);
+instr_two_value_value_value!(fadd);
+instr_two_value_value_value!(fsub);
+instr_two_value_value_value!(fmul);
+instr_two_value_value_value!(fdiv);
+instr_two_value_value_value!(fcopysign);
+instr_two_value_value_value!(fmin);
+instr_two_value_value_value!(fmin_pseudo);
+instr_two_value_value_value!(fmax);
+instr_two_value_value_value!(fmax_pseudo);
+instr_two_value_value_value!(snarrow);
+instr_two_value_value_value!(unarrow);
+instr_two_value_value_value!(uunarrow);
+instr_two_value_value_value!(iadd_pairwise);
+instr_two_value_value_value!(x86_pmaddubsw);
+instr_two_value_value_value!(iconcat);
 
 // (value) -> value
 instr_one_value_value!(ineg);
 instr_one_value_value!(iabs);
+instr_one_value_value!(vany_true);
+instr_one_value_value!(vall_true);
+instr_one_value_value!(bnot);
+instr_one_value_value!(bitrev);
+instr_one_value_value!(clz);
+instr_one_value_value!(cls);
+instr_one_value_value!(ctz);
+instr_one_value_value!(bswap);
+instr_one_value_value!(popcnt);
+instr_one_value_value!(sqrt);
+instr_one_value_value!(fneg);
+instr_one_value_value!(fabs);
+instr_one_value_value!(ceil);
+instr_one_value_value!(floor);
+instr_one_value_value!(trunc);
+instr_one_value_value!(nearest);
+instr_one_value_value!(is_null);
+instr_one_value_value!(is_invalid);
+instr_one_value_value!(swiden_low);
+instr_one_value_value!(uwiden_low);
+instr_one_value_value!(swiden_high);
+instr_one_value_value!(uwiden_high);
+instr_one_value_value!(fvdemote);
+instr_one_value_value!(fvpromote_low);
+
+// (value) -> inst
+instr_one_value_inst!(set_pinned_reg);
+
+// (value, block, svalue, block, svalue) -> inst
+instr_five_value_block_svalue_block_svalue_inst!(brif);
