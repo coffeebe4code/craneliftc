@@ -2,5 +2,7 @@ language = "C"
 pragma_once = true
 includes = ["craneliftc_extra.h"]
 
+usize_is_size_t = true
+
 [parse.expand]
 crates = ["paste", "cranelift", "craneliftc"]

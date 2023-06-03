@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include "craneliftc_extra.h"
@@ -108,7 +109,7 @@ void CL_FunctionBuilder_switch_to_block(FunctionBuilder *builder, CBlock block);
 
 void CL_FunctionBuilder_seal_block(FunctionBuilder *builder, CBlock block);
 
-CValue CL_FunctionBuilder_block_params(FunctionBuilder *builder, CBlock block, uintptr_t idx);
+CValue CL_FunctionBuilder_block_params(FunctionBuilder *builder, CBlock block, size_t idx);
 
 void CL_UserFuncName_dispose(UserFuncName *val);
 
@@ -142,25 +143,53 @@ CInst CL_FunctionBuilder_debugtrap(FunctionBuilder *builder);
 
 CInst CL_FunctionBuilder_fence(FunctionBuilder *builder);
 
-CInst CL_FunctionBuilder_trap(FunctionBuilder *builder, struct CTrapCode code, uint16_t user);
+CInst CL_FunctionBuilder_nop(FunctionBuilder *builder);
 
-CInst CL_FunctionBuilder_resumable_trap(FunctionBuilder *builder,
-                                        struct CTrapCode code,
-                                        uint16_t user);
+CInst CL_FunctionBuilder_trap(FunctionBuilder *builder, struct CTrapCode code);
 
-CInst CL_FunctionBuilder_trapz(FunctionBuilder *builder,
-                               CValue val,
-                               struct CTrapCode code,
-                               uint16_t user);
+CInst CL_FunctionBuilder_resumable_trap(FunctionBuilder *builder, struct CTrapCode code);
 
-CInst CL_FunctionBuilder_trapnz(FunctionBuilder *builder,
-                                CValue val,
-                                struct CTrapCode code,
-                                uint16_t user);
+CInst CL_FunctionBuilder_trapz(FunctionBuilder *builder, CValue val, struct CTrapCode code);
 
-CInst CL_FunctionBuilder_return_(FunctionBuilder *builder, CValue *rvals_raw, uintptr_t len);
+CInst CL_FunctionBuilder_trapnz(FunctionBuilder *builder, CValue val, struct CTrapCode code);
+
+CInst CL_FunctionBuilder_return_(FunctionBuilder *builder, CValue *rvals_raw, size_t len);
 
 CValue CL_FunctionBuilder_iconst(FunctionBuilder *builder, enum CType one, CImm64 imm);
+
+CValue CL_FunctionBuilder_scalar_to_vector(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_bmask(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_ireduce(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_uextend(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_sextend(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fpromote(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fdemote(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fcvt_to_uint(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fcvt_to_sint(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fcvt_to_sint_sat(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_x86_cvtt2dq(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fcvt_from_uint(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fcvt_from_sint(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_fcvt_low_from_sint(FunctionBuilder *builder, enum CType one, CValue val);
+
+CValue CL_FunctionBuilder_get_stack_pointer(FunctionBuilder *builder, enum CType one);
+
+CValue CL_FunctionBuilder_get_return_address(FunctionBuilder *builder, enum CType one);
+
+CValue CL_FunctionBuilder_null(FunctionBuilder *builder, enum CType one);
 
 CValue CL_FunctionBuilder_iadd_imm(FunctionBuilder *builder, CValue one, CImm64 imm);
 
@@ -197,7 +226,7 @@ CInst CL_FunctionBuilder_br_table(FunctionBuilder *builder, CValue val, CJumpTab
 CInst CL_FunctionBuilder_jump(FunctionBuilder *builder,
                               CBlock block_call_label,
                               CValue *block_call_args,
-                              uintptr_t len);
+                              size_t len);
 
 CValue CL_FunctionBuilder_select(FunctionBuilder *builder, CValue c, CValue left, CValue right);
 
@@ -370,7 +399,7 @@ CInst CL_FunctionBuilder_brif(FunctionBuilder *builder,
                               CValue val,
                               CBlock block_one_label,
                               CValue *block_one_args,
-                              uintptr_t one_len,
+                              size_t one_len,
                               CBlock block_two_label,
                               CValue *block_two_args,
-                              uintptr_t two_len);
+                              size_t two_len);
