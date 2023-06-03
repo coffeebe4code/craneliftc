@@ -310,11 +310,11 @@ macro_rules! easy_type {
     };
 }
 
-macro_rules! value_enum {
-    ($val:ident, $nl:ident, $nr:ident, $var:ident,$custom:ident, $($variant:ident,)*) => {
+macro_rules! union_enum {
+    ($val:ident, $nl:ident, $nr:ident, $($variant:ident,)*) => {
         match $val {
-            $($nl::$variant => $nr::$variant,)*
-            _ => $nr::$var($custom)
+            $($nl::$variant => Some($nr::$variant),)*
+            _ => None
         }
     };
 }
@@ -355,13 +355,11 @@ fn convert_CCallConv(ccd: CCallConv) -> CallConv {
 }
 
 #[allow(non_snake_case)]
-fn convert_CTrapCode(ctc: CTrapCode, user: u16) -> TrapCode {
-    return value_enum!(
+fn convert_CTrapCode(ctc: CTrapCode) -> TrapCode {
+    let result = union_enum!(
         ctc,
         CTrapCode,
         TrapCode,
-        User,
-        user,
         StackOverflow,
         HeapOutOfBounds,
         HeapMisaligned,
@@ -374,6 +372,15 @@ fn convert_CTrapCode(ctc: CTrapCode, user: u16) -> TrapCode {
         UnreachableCodeReached,
         Interrupt,
     );
+    if result.is_none() {
+        if let CTrapCode::User(x) = ctc {
+            return TrapCode::User(x);
+        } else {
+            return result.unwrap();
+        }
+    } else {
+        return result.unwrap();
+    }
 }
 
 macro_rules! namespace_new {
@@ -765,6 +772,40 @@ macro_rules! instr_two_value_imm_value {
     };
 }
 
+macro_rules! instr_one_type_value {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CType) -> CValue {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(convert_CType(one));
+                CValue(result.as_u32())
+            }
+        }
+    };
+}
+
+macro_rules! instr_two_type_value_value {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CType, val: CValue) -> CValue {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(convert_CType(one), Value::from_u32(val.0));
+                CValue(result.as_u32())
+            }
+        }
+    };
+}
+
 macro_rules! instr_two_type_imm_value {
     ($invoke:ident) => {
         paste::paste! {
@@ -824,12 +865,12 @@ macro_rules! instr_two_value_code_inst {
         paste::paste! {
             #[no_mangle]
             #[allow(non_snake_case)]
-            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, val: CValue, code: CTrapCode, user: u16) -> CInst {
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, val: CValue, code: CTrapCode) -> CInst {
                 assert!(!builder.is_null());
                 let ubuilder = unsafe { &mut *builder };
                 let result = ubuilder
                     .ins()
-                    .$invoke(Value::from_u32(val.0),convert_CTrapCode(code, user));
+                    .$invoke(Value::from_u32(val.0),convert_CTrapCode(code));
                 CInst(result.as_u32())
             }
         }
@@ -841,12 +882,12 @@ macro_rules! instr_one_code_inst {
         paste::paste! {
             #[no_mangle]
             #[allow(non_snake_case)]
-            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, code: CTrapCode, user: u16) -> CInst {
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, code: CTrapCode) -> CInst {
                 assert!(!builder.is_null());
                 let ubuilder = unsafe { &mut *builder };
                 let result = ubuilder
                     .ins()
-                    .$invoke(convert_CTrapCode(code, user));
+                    .$invoke(convert_CTrapCode(code));
                 CInst(result.as_u32())
             }
         }
@@ -875,6 +916,7 @@ macro_rules! instr_zero_inst {
 // () -> inst
 instr_zero_inst!(debugtrap);
 instr_zero_inst!(fence);
+instr_zero_inst!(nop);
 
 // (code) -> inst
 instr_one_code_inst!(trap);
@@ -889,6 +931,27 @@ instr_one_svalue_inst!(return_);
 
 // (type, imm64) -> value
 instr_two_type_imm_value!(iconst);
+
+// (type, value) -> value
+instr_two_type_value_value!(scalar_to_vector);
+instr_two_type_value_value!(bmask);
+instr_two_type_value_value!(ireduce);
+instr_two_type_value_value!(uextend);
+instr_two_type_value_value!(sextend);
+instr_two_type_value_value!(fpromote);
+instr_two_type_value_value!(fdemote);
+instr_two_type_value_value!(fcvt_to_uint);
+instr_two_type_value_value!(fcvt_to_sint);
+instr_two_type_value_value!(fcvt_to_sint_sat);
+instr_two_type_value_value!(x86_cvtt2dq);
+instr_two_type_value_value!(fcvt_from_uint);
+instr_two_type_value_value!(fcvt_from_sint);
+instr_two_type_value_value!(fcvt_low_from_sint);
+
+// (type) -> value
+instr_one_type_value!(get_stack_pointer);
+instr_one_type_value!(get_return_address);
+instr_one_type_value!(null);
 
 // (value, imm64) -> value
 instr_two_value_imm_value!(iadd_imm);
