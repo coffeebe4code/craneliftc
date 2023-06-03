@@ -1,0 +1,23 @@
+name: cd
+on:
+  push:
+    branches:
+      - main
+jobs:
+  crate-linux:
+    runs-on: ubuntu-latest
+    defaults:
+        run:
+          working-directory: ./cranelift
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+        env:
+          CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
+      - run: |
+          cargo +nightly build --release
+          cargo +nightly test
+          cargo +nightly package
+          cargo +nightly publish -p craneliftc --token "$CARGO_TOKEN"

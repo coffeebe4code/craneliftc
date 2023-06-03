@@ -1,0 +1,16 @@
+[package]
+name = "craneliftc"
+version = "0.1.0"
+edition = "2021"
+description = "light c compatible ffi wrapper around cranelift"
+license-file = "../LICENSE"
+readme = "../README.md"
+
+[lib]
+name = "craneliftc"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+cranelift = "0"
+paste = "1.0.11"
+

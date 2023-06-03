@@ -1,0 +1,6 @@
+language = "C"
+pragma_once = true
+includes = ["craneliftc_extra.h"]
+
+[parse.expand]
+crates = ["paste", "cranelift", "craneliftc"]
