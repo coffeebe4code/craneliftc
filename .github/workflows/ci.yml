@@ -12,13 +12,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: nightly
-        env:
-          CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
       - run: |
           rustup component add rustfmt --toolchain nightly
           cargo +nightly install cbindgen --force
           cargo +nightly build
+          cargo +nightly test
           cargo +nightly fmt --all -- --check
           cbindgen --config cbindgen.toml --crate craneliftc --output ./headers/craneliftc.h
           git diff --quiet
-          cargo publish -p craneliftc --token "$CARGO_TOKEN" --dry-run
+          cargo publish -p craneliftc --token ${{ secrets.CARGO_TOKEN }} --dry-run

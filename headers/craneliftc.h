@@ -102,9 +102,9 @@ AbiParam *CL_AbiParam_new(enum CType one);
 
 Signature *CL_Signature_new(enum CCallConv one);
 
-void CL_Signature_returns_push(Signature *sig, AbiParam *conv);
+void CL_Signature_returns_push(Signature *sig, AbiParam *abi);
 
-void CL_Signature_params_push(Signature *sig, AbiParam *conv);
+void CL_Signature_params_push(Signature *sig, AbiParam *abi);
 
 void CL_Flags_dispose(Flags *val);
 
@@ -112,17 +112,24 @@ Flags *CL_Flags_new(Builder *builder);
 
 Builder *CL_Builder_builder(void);
 
+CInst CL_FunctionBuilder_debugtrap(FunctionBuilder *builder);
+
 CInst CL_FunctionBuilder_return_(FunctionBuilder *builder, CValue *rvals_raw, uintptr_t len);
 
-CValue CL_FunctionBuilder_iconst(FunctionBuilder *builder, enum CType one, CImm64 two);
+CValue CL_FunctionBuilder_iconst(FunctionBuilder *builder, enum CType one, CImm64 imm);
 
-CValue CL_FunctionBuilder_iadd(FunctionBuilder *builder, CValue one, CValue two);
+CInst CL_FunctionBuilder_jump(FunctionBuilder *builder,
+                              CBlock block_call_label,
+                              CValue *block_call_args,
+                              uintptr_t len);
 
-CValue CL_FunctionBuilder_isub(FunctionBuilder *builder, CValue one, CValue two);
+CValue CL_FunctionBuilder_iadd(FunctionBuilder *builder, CValue left, CValue right);
 
-CValue CL_FunctionBuilder_imul(FunctionBuilder *builder, CValue one, CValue two);
+CValue CL_FunctionBuilder_isub(FunctionBuilder *builder, CValue left, CValue right);
 
-CValue CL_FunctionBuilder_umulhi(FunctionBuilder *builder, CValue one, CValue two);
+CValue CL_FunctionBuilder_imul(FunctionBuilder *builder, CValue left, CValue right);
+
+CValue CL_FunctionBuilder_umulhi(FunctionBuilder *builder, CValue left, CValue right);
 
 CValue CL_FunctionBuilder_ineg(FunctionBuilder *builder, CValue one);
 

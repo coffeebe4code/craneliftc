@@ -336,19 +336,6 @@ macro_rules! namespace_new {
     };
 }
 
-//macro_rules! namespace_new_invoke_one {
-//    ($namespace:ident, $invoke:ident, $one:ident) => {
-//        paste::paste! {
-//            #[no_mangle]
-//            #[allow(non_snake_case)]
-//            pub extern "C" fn [< CL_ $namespace _ $invoke >](one: $one) -> *mut $namespace {
-//                let mut val = $namespace::$invoke(one);
-//                return &mut val;
-//            }
-//        }
-//    };
-//}
-
 macro_rules! namespace_new_one_convert {
     ($namespace:ident, $one:ident) => {
         paste::paste! {
@@ -368,8 +355,7 @@ macro_rules! empty_dispose {
             #[allow(non_snake_case)]
             pub extern "C" fn [< CL_ $namespace _dispose >](val: *mut $namespace) -> () {
                 if (!val.is_null()) {
-                    let to_drop = unsafe { core::ptr::read(val) };
-                    core::mem::drop(to_drop);
+                    unsafe { Box::from_raw(val) };
                 }
             }
         }
@@ -378,19 +364,19 @@ macro_rules! empty_dispose {
 
 #[no_mangle]
 pub extern "C" fn cstr_free(s: *mut c_char) {
-    unsafe {
-        if s.is_null() {
-            return;
-        }
-        CString::from_raw(s)
-    };
+    if s.is_null() {
+        return;
+    }
+    unsafe { CString::from_raw(s) };
 }
 
-// FUNCTIONBUILDERCONTEXT
+// FUNCTIONBUILDERCONTEXT Does not implement Copy
 namespace_new!(FunctionBuilderContext);
 empty_dispose!(FunctionBuilderContext);
 
-// FUNCTIONBUILDER
+// FUNCTIONBUILDER Does not implement Copy, finalize is called unclear if it should take complete
+// ownership
+
 empty_dispose!(FunctionBuilder);
 
 #[no_mangle]
@@ -438,21 +424,6 @@ pub extern "C" fn CL_FunctionBuilder_def_var(
     ubuilder.def_var(Variable::from_u32(variable.0), Value::from_u32(val.0));
 }
 
-//#[no_mangle]
-//#[allow(non_snake_case)]
-//pub extern "C" fn CL_FunctionBuilder_imul(
-//    builder: *mut FunctionBuilder,
-//    left: CValue,
-//    right: CValue,
-//) -> CValue {
-//    assert!(!builder.is_null());
-//    let ubuilder = unsafe { &mut *builder };
-//    let result = ubuilder
-//        .ins()
-//        .imul(Value::from_u32(left.0), Value::from_u32(right.0));
-//    CValue(result.as_u32())
-//}
-
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "C" fn CL_FunctionBuilder_use_var(
@@ -480,7 +451,7 @@ pub extern "C" fn CL_FunctionBuilder_append_block_params_for_function_params(
 #[allow(non_snake_case)]
 pub extern "C" fn CL_FunctionBuilder_finalize(builder: *mut FunctionBuilder) -> () {
     assert!(!builder.is_null());
-    let ubuilder = unsafe { core::ptr::read(builder) };
+    let ubuilder = unsafe { Box::from_raw(builder) };
     ubuilder.finalize();
 }
 
@@ -544,9 +515,9 @@ pub extern "C" fn CL_Function_with_name_signature(
 ) -> *mut Function {
     assert!(!sig.is_null());
     assert!(!user.is_null());
-    let usig = unsafe { core::ptr::read(sig) };
-    let uuser = unsafe { core::ptr::read(user) };
-    return Box::into_raw(Box::new(Function::with_name_signature(uuser, usig)));
+    let usig = unsafe { Box::from_raw(sig) };
+    let uuser = unsafe { Box::from_raw(user) };
+    return Box::into_raw(Box::new(Function::with_name_signature(*uuser, *usig)));
 }
 
 #[no_mangle]
@@ -568,32 +539,30 @@ pub extern "C" fn CL_Function_display(func: *mut Function) -> *mut c_char {
     return CString::new(display).unwrap().into_raw();
 }
 
-// ABIPARAM
+// ABIPARAM implements COPY
 namespace_new_one_convert!(AbiParam, CType);
-//empty_dispose!(AbiParam);
 
-// SIGNATURE
-//empty_dispose!(Signature);
+// SIGNATURE implements COPY
 namespace_new_one_convert!(Signature, CCallConv);
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn CL_Signature_returns_push(sig: *mut Signature, conv: *mut AbiParam) -> () {
-    assert!(!conv.is_null());
+pub extern "C" fn CL_Signature_returns_push(sig: *mut Signature, abi: *mut AbiParam) -> () {
+    assert!(!abi.is_null());
     assert!(!sig.is_null());
     let usig = unsafe { &mut *sig };
-    let uconv = unsafe { core::ptr::read(conv) };
-    usig.returns.push(uconv);
+    let uabi = unsafe { Box::from_raw(abi) };
+    usig.returns.push(*uabi);
 }
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn CL_Signature_params_push(sig: *mut Signature, conv: *mut AbiParam) -> () {
-    assert!(!sig.is_null());
-    assert!(!conv.is_null());
+pub extern "C" fn CL_Signature_params_push(sig: *mut Signature, abi: *mut AbiParam) -> () {
+    assert!(!abi.is_null());
+    assert!(!abi.is_null());
     let usig = unsafe { &mut *sig };
-    let uconv = unsafe { *conv };
-    usig.params.push(uconv);
+    let uabi = unsafe { Box::from_raw(abi) };
+    usig.params.push(*uabi);
 }
 
 // FLAGS
@@ -603,8 +572,8 @@ empty_dispose!(Flags);
 #[allow(non_snake_case)]
 pub extern "C" fn CL_Flags_new(builder: *mut Builder) -> *mut Flags {
     assert!(!builder.is_null());
-    let ubuilder = unsafe { core::ptr::read(builder) };
-    return Box::into_raw(Box::new(Flags::new(ubuilder)));
+    let ubuilder = unsafe { Box::from_raw(builder) };
+    return Box::into_raw(Box::new(Flags::new(*ubuilder)));
 }
 
 // SETTINGS
@@ -619,34 +588,36 @@ pub extern "C" fn CL_Builder_builder() -> *mut Builder {
 // MACROS FOR INSTRUCTIONS
 //
 
-//macro_rules! instr_two_block_svalue_inst {
-//    ($invoke:ident) => {
-//        paste::paste! {
-//            #[no_mangle]
-//            #[allow(non_snake_case)]
-//            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CBlock, two: &[CValue]) -> CValue {
-//                assert!(!builder.is_null());
-//                let ubuilder = unsafe { &mut *builder };
-//                let result = ubuilder
-//                    .ins()
-//                    .$invoke(Value::from_u32(one.0), two.0);
-//                CValue(result.as_u32())
-//            }
-//        }
-//    };
-//}
+macro_rules! instr_two_block_svalue_inst {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, block_call_label: CBlock, block_call_args: *mut CValue, len: usize) -> CInst {
+                assert!(!builder.is_null());
+                let rvals = unsafe { core::slice::from_raw_parts(block_call_args, len)};
+                let converts: Vec<Value> = rvals.into_iter().map(|x| {return Value::from_u32(x.0); }).collect();
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(Block::from_u32(block_call_label.0), converts.as_slice());
+                CInst(result.as_u32())
+            }
+        }
+    };
+}
 
 macro_rules! instr_two_value_value_value {
     ($invoke:ident) => {
         paste::paste! {
             #[no_mangle]
             #[allow(non_snake_case)]
-            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CValue, two: CValue) -> CValue {
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, left: CValue, right: CValue) -> CValue {
                 assert!(!builder.is_null());
                 let ubuilder = unsafe { &mut *builder };
                 let result = ubuilder
                     .ins()
-                    .$invoke(Value::from_u32(one.0), Value::from_u32(two.0));
+                    .$invoke(Value::from_u32(left.0), Value::from_u32(right.0));
                 CValue(result.as_u32())
             }
         }
@@ -675,12 +646,12 @@ macro_rules! instr_two_type_imm_value {
         paste::paste! {
             #[no_mangle]
             #[allow(non_snake_case)]
-            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CType, two: CImm64) -> CValue {
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, one: CType, imm: CImm64) -> CValue {
                 assert!(!builder.is_null());
                 let ubuilder = unsafe { &mut *builder };
                 let result = ubuilder
                     .ins()
-                    .$invoke(convert_CType(one), Imm64::new(two.0));
+                    .$invoke(convert_CType(one), Imm64::new(imm.0));
                 CValue(result.as_u32())
             }
         }
@@ -706,7 +677,28 @@ macro_rules! instr_one_svalue_inst {
         }
     };
 }
+
+macro_rules! instr_zero_inst {
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder) -> CInst {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke();
+                CInst(result.as_u32())
+            }
+        }
+    };
+}
 // INSTRUCTIONS
+//
+
+// () -> inst
+instr_zero_inst!(debugtrap);
 
 // (svalue) -> inst
 instr_one_svalue_inst!(return_);
@@ -715,6 +707,7 @@ instr_one_svalue_inst!(return_);
 instr_two_type_imm_value!(iconst);
 
 // (block, svalue) -> inst
+instr_two_block_svalue_inst!(jump);
 
 // (value, value) -> value
 
