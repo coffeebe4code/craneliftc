@@ -6,9 +6,6 @@ on:
 jobs:
   crate-linux:
     runs-on: ubuntu-latest
-    defaults:
-        run:
-          working-directory: ./cranelift
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
