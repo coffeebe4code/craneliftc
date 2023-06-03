@@ -14,7 +14,5 @@ jobs:
         env:
           CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
       - run: |
-          cargo +nightly build --release
-          cargo +nightly test
           cargo +nightly package
-          cargo +nightly publish -p craneliftc --token "$CARGO_TOKEN"
+          cargo +nightly publish -p craneliftc --token $CARGO_TOKEN
