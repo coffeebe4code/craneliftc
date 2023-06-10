@@ -11,14 +11,15 @@ From what I can tell in the license, this is not necessarily a Derivative work, 
 
 ## Crate
 
-**Note** to users seeing this on crates.io, you will need to follow the [To Use](#To-Use) documentation to instal
+**Note** to users seeing this on crates.io, you will need to follow the [To Use](#To-Use) documentation to install.
+This is a greate place to see the abi's on a different screen.
 
-Alternately, you can create a wrapper project, and `pub use` both craneliftc, and cranelift, and run cargo build for that project. This is extra steps. Installing with the repsitory locally is easier.
+Alternately, you can create a wrapper project, and `pub use` both craneliftc, and cranelift, and run cargo build for that project. It will then get installed to your local target directory, and then use the `cbindgen command found in the makefile`. These are significant extra steps. Installing with the repsitory locally is easier.
 
 ## To Use
  
 1. ensure you are on rust nightly.
-2. ensure you have cbindgen installed. `cargo install cross`
+2. ensure you have cbindgen installed. `cargo install cbindgen`
 
 **Note** if you want to cross compile `craneliftc`, ensure you have cross installed. `cargo install cross`
 
