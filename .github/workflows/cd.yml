@@ -14,4 +14,4 @@ jobs:
       - run: |
           mv Cargo-copy.toml Cargo.toml
           cargo +nightly package
-          cargo +nightly publish -p craneliftc --token ${{ secrets.CARGO_TOKEN }}
+          cargo +nightly publish -p craneliftc --token ${{ secrets.CARGO_TOKEN }} --allow-dirty
