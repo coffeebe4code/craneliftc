@@ -20,4 +20,3 @@ jobs:
           cargo +nightly fmt --all -- --check
           cbindgen --config cbindgen.toml --crate craneliftc --output ./headers/craneliftc.h
           git diff --quiet
-          cargo publish -p craneliftc --token ${{ secrets.CARGO_TOKEN }} --dry-run

@@ -1,4 +1,14 @@
-[workspace]
-members = [
-  "craneliftc",
-]
+[package]
+name = "craneliftc"
+version = "0.1.0"
+edition = "2021"
+description = "this is the version which is for building locally, always 0.1.0"
+
+[lib]
+name = "craneliftc"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+cranelift = "0"
+paste = "1.0.11"
+
