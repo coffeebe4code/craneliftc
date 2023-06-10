@@ -1,10 +1,10 @@
 [package]
 name = "craneliftc"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "light c compatible ffi wrapper around cranelift"
-license-file = "../LICENSE"
-readme = "../README.md"
+license-file = "LICENSE"
+readme = "README.md"
 
 [dependencies]
 cranelift = "0"
