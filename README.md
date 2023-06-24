@@ -36,3 +36,6 @@ This library uses opaque pointers, so an additional header file is needed. `cran
 As a convenience, the header files can be taken from here.
 [header files](https://github.com/coffeebe4code/craneliftc/tree/main/headers)
 
+to generate the cbindgen headers run, `make cbindgen`
+
+

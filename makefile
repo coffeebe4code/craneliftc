@@ -1,19 +1,19 @@
-release: cbindgen
+release:
 	cargo build --release
 # Phony
 .PHONY: release
 
-debug: cbindgen
+debug:
 	cargo build
 # Phony
 .PHONY: debug
 
-target-release: cbindgen
+target-release:
 	cross build --release --target $(triple)
 # Phony
 .PHONY: target-release
 
-target-debug: cbindgen
+target-debug:
 	cross build --target $(triple)
 # Phony
 .PHONY: target-debug
