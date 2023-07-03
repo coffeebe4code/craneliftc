@@ -414,7 +414,7 @@ macro_rules! empty_dispose {
             #[allow(non_snake_case)]
             pub extern "C" fn [< CL_ $namespace _dispose >](val: *mut $namespace) -> () {
                 if (!val.is_null()) {
-                    unsafe { Box::from_raw(val) };
+                    unsafe { drop(Box::from_raw(val)) };
                 }
             }
         }
@@ -426,7 +426,7 @@ pub extern "C" fn cstr_free(s: *mut c_char) {
     if s.is_null() {
         return;
     }
-    unsafe { CString::from_raw(s) };
+    unsafe { drop(CString::from_raw(s)) };
 }
 
 // FUNCTIONBUILDERCONTEXT Does not implement Copy
