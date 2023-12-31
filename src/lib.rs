@@ -618,7 +618,7 @@ pub extern "C" fn CL_Signature_returns_push(sig: *mut Signature, abi: *mut AbiPa
 #[allow(non_snake_case)]
 pub extern "C" fn CL_Signature_params_push(sig: *mut Signature, abi: *mut AbiParam) -> () {
     assert!(!abi.is_null());
-    assert!(!abi.is_null());
+    assert!(!sig.is_null());
     let usig = unsafe { &mut *sig };
     let uabi = unsafe { Box::from_raw(abi) };
     usig.params.push(*uabi);
