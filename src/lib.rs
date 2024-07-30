@@ -299,8 +299,6 @@ pub enum CCallConv {
     AppleAarch64,
     Probestack,
     WasmtimeSystemV,
-    WasmtimeFastcall,
-    WasmtimeAppleAarch64,
 }
 macro_rules! easy_type {
     ($val:ident, $typ:ident, $($variant:ident,)*) => {
@@ -337,6 +335,7 @@ fn convert_CType(td: CType) -> Type {
 
 #[allow(non_snake_case)]
 fn convert_CCallConv(ccd: CCallConv) -> CallConv {
+    use cranelift::prelude::isa::CallConv;
     return easy_enum!(
         ccd,
         CCallConv,
@@ -349,8 +348,6 @@ fn convert_CCallConv(ccd: CCallConv) -> CallConv {
         AppleAarch64,
         Probestack,
         WasmtimeSystemV,
-        WasmtimeFastcall,
-        WasmtimeAppleAarch64,
     );
 }
 
@@ -618,7 +615,7 @@ pub extern "C" fn CL_Signature_returns_push(sig: *mut Signature, abi: *mut AbiPa
 #[allow(non_snake_case)]
 pub extern "C" fn CL_Signature_params_push(sig: *mut Signature, abi: *mut AbiParam) -> () {
     assert!(!abi.is_null());
-    assert!(!abi.is_null());
+    assert!(!sig.is_null());
     let usig = unsafe { &mut *sig };
     let uabi = unsafe { Box::from_raw(abi) };
     usig.params.push(*uabi);
@@ -920,7 +917,6 @@ instr_zero_inst!(nop);
 
 // (code) -> inst
 instr_one_code_inst!(trap);
-instr_one_code_inst!(resumable_trap);
 
 // (value, code) -> inst
 instr_two_value_code_inst!(trapz);
@@ -941,12 +937,12 @@ instr_two_type_value_value!(sextend);
 instr_two_type_value_value!(fpromote);
 instr_two_type_value_value!(fdemote);
 instr_two_type_value_value!(fcvt_to_uint);
+instr_two_type_value_value!(fcvt_to_uint_sat);
 instr_two_type_value_value!(fcvt_to_sint);
 instr_two_type_value_value!(fcvt_to_sint_sat);
 instr_two_type_value_value!(x86_cvtt2dq);
 instr_two_type_value_value!(fcvt_from_uint);
 instr_two_type_value_value!(fcvt_from_sint);
-instr_two_type_value_value!(fcvt_low_from_sint);
 
 // (type) -> value
 instr_one_type_value!(get_stack_pointer);
@@ -1027,9 +1023,7 @@ instr_two_value_value_value!(fmul);
 instr_two_value_value_value!(fdiv);
 instr_two_value_value_value!(fcopysign);
 instr_two_value_value_value!(fmin);
-instr_two_value_value_value!(fmin_pseudo);
 instr_two_value_value_value!(fmax);
-instr_two_value_value_value!(fmax_pseudo);
 instr_two_value_value_value!(snarrow);
 instr_two_value_value_value!(unarrow);
 instr_two_value_value_value!(uunarrow);

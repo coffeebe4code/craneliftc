@@ -1,0 +1,2255 @@
+#![feature(prelude_import)]
+#[prelude_import]
+use std::prelude::rust_2021::*;
+#[macro_use]
+extern crate std;
+use std::ffi::{c_char, CString};
+use cranelift::codegen::ir::{
+    entities::JumpTable, types::*, Function, TrapCode, UserFuncName,
+};
+use cranelift::codegen::verifier::verify_function;
+use cranelift::prelude::isa::CallConv;
+use cranelift::prelude::settings::{self, Builder, Flags};
+use cranelift::prelude::{
+    AbiParam, Block, FunctionBuilder, FunctionBuilderContext, Imm64, InstBuilder,
+    Signature, Value, Variable,
+};
+#[repr(C)]
+pub enum CTrapCode {
+    StackOverflow,
+    HeapOutOfBounds,
+    HeapMisaligned,
+    TableOutOfBounds,
+    IndirectCallToNull,
+    BadSignature,
+    IntegerOverflow,
+    IntegerDivisionByZero,
+    BadConversionToInteger,
+    UnreachableCodeReached,
+    Interrupt,
+    User(u16),
+}
+#[repr(C)]
+pub enum CType {
+    I8,
+    I16,
+    I32,
+    I64,
+    I128,
+    F32,
+    F64,
+    R32,
+    R64,
+    I8X8,
+    I16X4,
+    I32X2,
+    F32X2,
+    I8X16,
+    I16X8,
+    I32X4,
+    I64X2,
+    F32X4,
+    F64X2,
+    F32X8,
+    F64X4,
+    F32X16,
+    F64X8,
+}
+#[repr(transparent)]
+pub struct CImm64(i64);
+#[repr(transparent)]
+pub struct CVariable(u32);
+#[repr(transparent)]
+pub struct CBlock(u32);
+#[repr(transparent)]
+pub struct CValue(u32);
+#[repr(transparent)]
+pub struct CInst(u32);
+#[repr(transparent)]
+pub struct CFuncRef(u32);
+#[repr(transparent)]
+pub struct CJumpTable(u32);
+#[repr(C)]
+pub enum CCallConv {
+    Fast,
+    Cold,
+    Tail,
+    SystemV,
+    WindowsFastcall,
+    AppleAarch64,
+    Probestack,
+    WasmtimeSystemV,
+    WasmtimeFastcall,
+    WasmtimeAppleAarch64,
+}
+#[allow(non_snake_case)]
+fn convert_CType(td: CType) -> Type {
+    return match td {
+        CType::I8 => I8,
+        CType::I16 => I16,
+        CType::I32 => I32,
+        CType::I64 => I64,
+        CType::I128 => I128,
+        CType::F32 => F32,
+        CType::F64 => F64,
+        CType::R32 => R32,
+        CType::R64 => R64,
+        CType::I8X8 => I8X8,
+        CType::I16X4 => I16X4,
+        CType::I32X2 => I32X2,
+        CType::F32X2 => F32X2,
+        CType::I8X16 => I8X16,
+        CType::I16X8 => I16X8,
+        CType::I32X4 => I32X4,
+        CType::I64X2 => I64X2,
+        CType::F32X4 => F32X4,
+        CType::F64X2 => F64X2,
+        CType::F32X8 => F32X8,
+        CType::F64X4 => F64X4,
+        CType::F32X16 => F32X16,
+        CType::F64X8 => F64X8,
+    };
+}
+#[allow(non_snake_case)]
+fn convert_CCallConv(ccd: CCallConv) -> CallConv {
+    use cranelift::prelude::isa::CallConv;
+    return match ccd {
+        CCallConv::Fast => CallConv::Fast,
+        CCallConv::Cold => CallConv::Cold,
+        CCallConv::Tail => CallConv::Tail,
+        CCallConv::SystemV => CallConv::SystemV,
+        CCallConv::WindowsFastcall => CallConv::WindowsFastcall,
+        CCallConv::AppleAarch64 => CallConv::AppleAarch64,
+        CCallConv::Probestack => CallConv::Probestack,
+        CCallConv::WasmtimeSystemV => CallConv::WasmtimeSystemV,
+        CCallConv::WasmtimeFastcall => CallConv::WasmtimeFastcall,
+        CCallConv::WasmtimeAppleAarch64 => CallConv::WasmtimeAppleAarch64,
+    };
+}
+#[allow(non_snake_case)]
+fn convert_CTrapCode(ctc: CTrapCode) -> TrapCode {
+    let result = match ctc {
+        CTrapCode::StackOverflow => Some(TrapCode::StackOverflow),
+        CTrapCode::HeapOutOfBounds => Some(TrapCode::HeapOutOfBounds),
+        CTrapCode::HeapMisaligned => Some(TrapCode::HeapMisaligned),
+        CTrapCode::TableOutOfBounds => Some(TrapCode::TableOutOfBounds),
+        CTrapCode::IndirectCallToNull => Some(TrapCode::IndirectCallToNull),
+        CTrapCode::BadSignature => Some(TrapCode::BadSignature),
+        CTrapCode::IntegerOverflow => Some(TrapCode::IntegerOverflow),
+        CTrapCode::IntegerDivisionByZero => Some(TrapCode::IntegerDivisionByZero),
+        CTrapCode::BadConversionToInteger => Some(TrapCode::BadConversionToInteger),
+        CTrapCode::UnreachableCodeReached => Some(TrapCode::UnreachableCodeReached),
+        CTrapCode::Interrupt => Some(TrapCode::Interrupt),
+        _ => None,
+    };
+    if result.is_none() {
+        if let CTrapCode::User(x) = ctc {
+            return TrapCode::User(x);
+        } else {
+            return result.unwrap();
+        }
+    } else {
+        return result.unwrap();
+    }
+}
+#[no_mangle]
+pub extern "C" fn cstr_free(s: *mut c_char) {
+    if s.is_null() {
+        return;
+    }
+    unsafe { drop(CString::from_raw(s)) };
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilderContext_new() -> *mut FunctionBuilderContext {
+    return Box::into_raw(Box::new(FunctionBuilderContext::new()));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilderContext_dispose(
+    val: *mut FunctionBuilderContext,
+) -> () {
+    if (!val.is_null()) {
+        unsafe { drop(Box::from_raw(val)) };
+    }
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_dispose(val: *mut FunctionBuilder) -> () {
+    if (!val.is_null()) {
+        unsafe { drop(Box::from_raw(val)) };
+    }
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_new<'a>(
+    func: *mut Function,
+    ctx: *mut FunctionBuilderContext,
+) -> *mut FunctionBuilder<'a> {
+    if !!func.is_null() {
+        ::core::panicking::panic("assertion failed: !func.is_null()")
+    }
+    if !!ctx.is_null() {
+        ::core::panicking::panic("assertion failed: !ctx.is_null()")
+    }
+    let ufunc = unsafe { &mut *func };
+    let uctx = unsafe { &mut *ctx };
+    return Box::into_raw(Box::new(FunctionBuilder::new(ufunc, uctx)));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_create_block(
+    builder: *mut FunctionBuilder,
+) -> CBlock {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    return CBlock(ubuilder.create_block().as_u32());
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_declare_var(
+    builder: *mut FunctionBuilder,
+    variable: CVariable,
+    typ: CType,
+) -> () {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    ubuilder.declare_var(Variable::from_u32(variable.0), convert_CType(typ));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_def_var(
+    builder: *mut FunctionBuilder,
+    variable: CVariable,
+    val: CValue,
+) -> () {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    ubuilder.def_var(Variable::from_u32(variable.0), Value::from_u32(val.0));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_use_var(
+    builder: *mut FunctionBuilder,
+    variable: CVariable,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.use_var(Variable::from_u32(variable.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_append_block_params_for_function_params(
+    builder: *mut FunctionBuilder,
+    block: CBlock,
+) -> () {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    ubuilder.append_block_params_for_function_params(Block::from_u32(block.0));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_finalize(builder: *mut FunctionBuilder) -> () {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { Box::from_raw(builder) };
+    ubuilder.finalize();
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_switch_to_block(
+    builder: *mut FunctionBuilder,
+    block: CBlock,
+) -> () {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    ubuilder.switch_to_block(Block::from_u32(block.0));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_seal_block(
+    builder: *mut FunctionBuilder,
+    block: CBlock,
+) -> () {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    ubuilder.seal_block(Block::from_u32(block.0));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_block_params(
+    builder: *mut FunctionBuilder,
+    block: CBlock,
+    idx: usize,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.block_params(Block::from_u32(block.0))[idx];
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_UserFuncName_dispose(val: *mut UserFuncName) -> () {
+    if (!val.is_null()) {
+        unsafe { drop(Box::from_raw(val)) };
+    }
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_UserFuncName_user(one: u32, two: u32) -> *mut UserFuncName {
+    return Box::into_raw(Box::new(UserFuncName::user(one, two)));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Variable_from_u32(val: u32) -> CVariable {
+    return CVariable(val);
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Function_dispose(val: *mut Function) -> () {
+    if (!val.is_null()) {
+        unsafe { drop(Box::from_raw(val)) };
+    }
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Function_with_name_signature(
+    user: *mut UserFuncName,
+    sig: *mut Signature,
+) -> *mut Function {
+    if !!sig.is_null() {
+        ::core::panicking::panic("assertion failed: !sig.is_null()")
+    }
+    if !!user.is_null() {
+        ::core::panicking::panic("assertion failed: !user.is_null()")
+    }
+    let usig = unsafe { Box::from_raw(sig) };
+    let uuser = unsafe { Box::from_raw(user) };
+    return Box::into_raw(Box::new(Function::with_name_signature(*uuser, *usig)));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Function_verify(func: *mut Function, flags: *mut Flags) -> () {
+    if !!func.is_null() {
+        ::core::panicking::panic("assertion failed: !func.is_null()")
+    }
+    if !!flags.is_null() {
+        ::core::panicking::panic("assertion failed: !flags.is_null()")
+    }
+    let ufunc = unsafe { &*func };
+    let uflags = unsafe { &*flags };
+    return verify_function(ufunc, uflags).unwrap();
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Function_display(func: *mut Function) -> *mut c_char {
+    if !!func.is_null() {
+        ::core::panicking::panic("assertion failed: !func.is_null()")
+    }
+    let ufunc = unsafe { &*func };
+    let display = ufunc.display().to_string();
+    return CString::new(display).unwrap().into_raw();
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_AbiParam_new(one: CType) -> *mut AbiParam {
+    return Box::into_raw(Box::new(AbiParam::new(convert_CType(one))));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Signature_new(one: CCallConv) -> *mut Signature {
+    return Box::into_raw(Box::new(Signature::new(convert_CCallConv(one))));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Signature_returns_push(
+    sig: *mut Signature,
+    abi: *mut AbiParam,
+) -> () {
+    if !!abi.is_null() {
+        ::core::panicking::panic("assertion failed: !abi.is_null()")
+    }
+    if !!sig.is_null() {
+        ::core::panicking::panic("assertion failed: !sig.is_null()")
+    }
+    let usig = unsafe { &mut *sig };
+    let uabi = unsafe { Box::from_raw(abi) };
+    usig.returns.push(*uabi);
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Signature_params_push(
+    sig: *mut Signature,
+    abi: *mut AbiParam,
+) -> () {
+    if !!abi.is_null() {
+        ::core::panicking::panic("assertion failed: !abi.is_null()")
+    }
+    if !!sig.is_null() {
+        ::core::panicking::panic("assertion failed: !sig.is_null()")
+    }
+    let usig = unsafe { &mut *sig };
+    let uabi = unsafe { Box::from_raw(abi) };
+    usig.params.push(*uabi);
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Flags_dispose(val: *mut Flags) -> () {
+    if (!val.is_null()) {
+        unsafe { drop(Box::from_raw(val)) };
+    }
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Flags_new(builder: *mut Builder) -> *mut Flags {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { Box::from_raw(builder) };
+    return Box::into_raw(Box::new(Flags::new(*ubuilder)));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_Builder_builder() -> *mut Builder {
+    return Box::into_raw(Box::new(settings::builder()));
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_debugtrap(builder: *mut FunctionBuilder) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().debugtrap();
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fence(builder: *mut FunctionBuilder) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fence();
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_nop(builder: *mut FunctionBuilder) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().nop();
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_trap(
+    builder: *mut FunctionBuilder,
+    code: CTrapCode,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().trap(convert_CTrapCode(code));
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_trapz(
+    builder: *mut FunctionBuilder,
+    val: CValue,
+    code: CTrapCode,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().trapz(Value::from_u32(val.0), convert_CTrapCode(code));
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_trapnz(
+    builder: *mut FunctionBuilder,
+    val: CValue,
+    code: CTrapCode,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().trapnz(Value::from_u32(val.0), convert_CTrapCode(code));
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_return_(
+    builder: *mut FunctionBuilder,
+    rvals_raw: *mut CValue,
+    len: usize,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    if !!rvals_raw.is_null() {
+        ::core::panicking::panic("assertion failed: !rvals_raw.is_null()")
+    }
+    let rvals = unsafe { core::slice::from_raw_parts(rvals_raw, len) };
+    let ubuilder = unsafe { &mut *builder };
+    let converts: Vec<Value> = rvals
+        .into_iter()
+        .map(|x| {
+            return Value::from_u32(x.0);
+        })
+        .collect();
+    let result = ubuilder.ins().return_(converts.as_slice());
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_iconst(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().iconst(convert_CType(one), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_scalar_to_vector(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .scalar_to_vector(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bmask(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bmask(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ireduce(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ireduce(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_uextend(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().uextend(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sextend(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().sextend(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fpromote(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fpromote(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fdemote(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fdemote(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fcvt_to_uint(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fcvt_to_uint(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fcvt_to_uint_sat(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .fcvt_to_uint_sat(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fcvt_to_sint(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fcvt_to_sint(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fcvt_to_sint_sat(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .fcvt_to_sint_sat(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_x86_cvtt2dq(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().x86_cvtt2dq(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fcvt_from_uint(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .fcvt_from_uint(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fcvt_from_sint(
+    builder: *mut FunctionBuilder,
+    one: CType,
+    val: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .fcvt_from_sint(convert_CType(one), Value::from_u32(val.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_get_stack_pointer(
+    builder: *mut FunctionBuilder,
+    one: CType,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().get_stack_pointer(convert_CType(one));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_get_return_address(
+    builder: *mut FunctionBuilder,
+    one: CType,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().get_return_address(convert_CType(one));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_null(
+    builder: *mut FunctionBuilder,
+    one: CType,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().null(convert_CType(one));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_iadd_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().iadd_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_imul_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().imul_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_udiv_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().udiv_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sdiv_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().sdiv_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_urem_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().urem_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_srem_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().srem_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_irsub_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().irsub_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_band_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().band_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bor_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bor_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bxor_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bxor_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_rotl_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().rotl_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_rotr_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().rotr_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ishl_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ishl_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ushr_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ushr_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sshr_imm(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+    imm: CImm64,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().sshr_imm(Value::from_u32(one.0), Imm64::new(imm.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_br_table(
+    builder: *mut FunctionBuilder,
+    val: CValue,
+    jt: CJumpTable,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .br_table(Value::from_u32(val.0), JumpTable::from_u32(jt.0));
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_jump(
+    builder: *mut FunctionBuilder,
+    block_call_label: CBlock,
+    block_call_args: *mut CValue,
+    len: usize,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let rvals = unsafe { core::slice::from_raw_parts(block_call_args, len) };
+    let converts: Vec<Value> = rvals
+        .into_iter()
+        .map(|x| {
+            return Value::from_u32(x.0);
+        })
+        .collect();
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .jump(Block::from_u32(block_call_label.0), converts.as_slice());
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_select(
+    builder: *mut FunctionBuilder,
+    c: CValue,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .select(Value::from_u32(c.0), Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_select_spectre_guard(
+    builder: *mut FunctionBuilder,
+    c: CValue,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .select_spectre_guard(
+            Value::from_u32(c.0),
+            Value::from_u32(left.0),
+            Value::from_u32(right.0),
+        );
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bitselect(
+    builder: *mut FunctionBuilder,
+    c: CValue,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .bitselect(
+            Value::from_u32(c.0),
+            Value::from_u32(left.0),
+            Value::from_u32(right.0),
+        );
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_x86_blendv(
+    builder: *mut FunctionBuilder,
+    c: CValue,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .x86_blendv(
+            Value::from_u32(c.0),
+            Value::from_u32(left.0),
+            Value::from_u32(right.0),
+        );
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_iadd_cin(
+    builder: *mut FunctionBuilder,
+    c: CValue,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .iadd_cin(
+            Value::from_u32(c.0),
+            Value::from_u32(left.0),
+            Value::from_u32(right.0),
+        );
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_isub_bin(
+    builder: *mut FunctionBuilder,
+    c: CValue,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .isub_bin(
+            Value::from_u32(c.0),
+            Value::from_u32(left.0),
+            Value::from_u32(right.0),
+        );
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fma(
+    builder: *mut FunctionBuilder,
+    c: CValue,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .fma(Value::from_u32(c.0), Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_iadd(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().iadd(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_uadd_sat(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .uadd_sat(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sadd_sat(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .sadd_sat(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_isub(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().isub(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_udiv(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().udiv(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sdiv(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().sdiv(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_urem(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().urem(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_srem(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().srem(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_usub_sat(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .usub_sat(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ssub_sat(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .ssub_sat(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_imul(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().imul(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_umulhi(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .umulhi(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_smulhi(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .smulhi(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sqmul_round_sat(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .sqmul_round_sat(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_x86_pmulhrsw(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .x86_pmulhrsw(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_smin(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().smin(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_umin(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().umin(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_smax(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().smax(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_umax(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().umax(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_avg_round(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .avg_round(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_swizzle(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .swizzle(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_x86_pshufb(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .x86_pshufb(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_band(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().band(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bor(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bor(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bxor(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bxor(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_band_not(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .band_not(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bor_not(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .bor_not(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bxor_not(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .bxor_not(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_rotl(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().rotl(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_rotr(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().rotr(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ishl(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ishl(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ushr(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ushr(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sshr(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().sshr(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fadd(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fadd(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fsub(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fsub(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fmul(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fmul(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fdiv(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fdiv(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fcopysign(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .fcopysign(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fmin(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fmin(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fmax(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fmax(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_snarrow(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .snarrow(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_unarrow(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .unarrow(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_uunarrow(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .uunarrow(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_iadd_pairwise(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .iadd_pairwise(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_x86_pmaddubsw(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .x86_pmaddubsw(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_iconcat(
+    builder: *mut FunctionBuilder,
+    left: CValue,
+    right: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder
+        .ins()
+        .iconcat(Value::from_u32(left.0), Value::from_u32(right.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ineg(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ineg(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_iabs(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().iabs(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_vany_true(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().vany_true(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_vall_true(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().vall_true(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bnot(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bnot(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bitrev(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bitrev(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_clz(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().clz(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_cls(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().cls(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ctz(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ctz(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_bswap(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().bswap(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_popcnt(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().popcnt(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_sqrt(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().sqrt(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fneg(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fneg(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fabs(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fabs(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_ceil(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().ceil(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_floor(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().floor(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_trunc(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().trunc(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_nearest(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().nearest(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_is_null(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().is_null(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_is_invalid(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().is_invalid(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_swiden_low(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().swiden_low(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_uwiden_low(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().uwiden_low(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_swiden_high(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().swiden_high(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_uwiden_high(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().uwiden_high(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fvdemote(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fvdemote(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_fvpromote_low(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CValue {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().fvpromote_low(Value::from_u32(one.0));
+    CValue(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_set_pinned_reg(
+    builder: *mut FunctionBuilder,
+    one: CValue,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let ubuilder = unsafe { &mut *builder };
+    let result = ubuilder.ins().set_pinned_reg(Value::from_u32(one.0));
+    CInst(result.as_u32())
+}
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_FunctionBuilder_brif(
+    builder: *mut FunctionBuilder,
+    val: CValue,
+    block_one_label: CBlock,
+    block_one_args: *mut CValue,
+    one_len: usize,
+    block_two_label: CBlock,
+    block_two_args: *mut CValue,
+    two_len: usize,
+) -> CInst {
+    if !!builder.is_null() {
+        ::core::panicking::panic("assertion failed: !builder.is_null()")
+    }
+    let first = unsafe { core::slice::from_raw_parts(block_one_args, one_len) };
+    let second = unsafe { core::slice::from_raw_parts(block_two_args, two_len) };
+    let converts_one: Vec<Value> = first
+        .into_iter()
+        .map(|x| {
+            return Value::from_u32(x.0);
+        })
+        .collect();
+    let converts_two: Vec<Value> = second
+        .into_iter()
+        .map(|x| {
+            return Value::from_u32(x.0);
+        })
+        .collect();
+    let ubuilder = unsafe { &mut *builder };
+    let cval = Value::from_u32(val.0);
+    let result = ubuilder
+        .ins()
+        .brif(
+            cval,
+            Block::from_u32(block_one_label.0),
+            converts_one.as_slice(),
+            Block::from_u32(block_two_label.0),
+            converts_two.as_slice(),
+        );
+    CInst(result.as_u32())
+}
